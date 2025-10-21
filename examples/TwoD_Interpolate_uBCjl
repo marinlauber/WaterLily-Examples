@@ -1,0 +1,46 @@
+using WaterLily, CUDA, StaticArrays, Plots
+
+function make(L=32;U=1,Re=250,a=0.5,mem=Array,T=Float32)
+    # the velocity points
+    u = SA_F32[[min(a*i/L,U) for i in 1:100]...]
+    ts = SA_F32[collect(range(0,4L,100))...]
+
+    # the function
+    function u_int(i,x::SVector{N,T},t) where {N,T}
+        # only u velocity is set
+        i ≠ 1 && return 0.f0
+
+        # Index below the interpolation coordinate and the difference
+        k = clamp(searchsortedfirst(ts, t)-1, firstindex(ts), lastindex(ts)-1);
+        y = (clamp(t, minimum(ts), maximum(ts))-ts[k])/(ts[k+1]-ts[k])
+
+        # CartesianIndices around t
+        I = CartesianIndex(k); R = I:I+oneunit(I)
+
+        # Linearly weighted sum over arr[R] (in serial)
+        s = zero(T)
+        @fastmath @inbounds @simd for J in R
+            weight = ifelse(J.I==I.I,1-y,y)
+            s += u[J]*weight
+        end
+        return s
+    end
+
+    # circle of diameter L
+    body = AutoBody((x,t) -> √sum(abs2, x.-3L/2)-L/2.f0)
+
+    # make the simulation
+    Simulation((6L,3L),u_int,L;U,body,ν=U*L/Re,mem,T)
+end
+sim = make(mem=CuArray,T=Float32)
+
+using ForwardDiff
+acceleration(i,x,t) = ForwardDiff.derivative(τ->sim.flow.uBC(i,x,τ),t)
+tis = collect(range(0,3.9,1000))
+us = [sim.flow.uBC(1,SA_F32[0.,0.],t*sim.L) for t in tis]
+as = [acceleration(1,SA_F32[0.,0.],t*sim.L) for t in tis]
+plot(tis, us, label="u", xlabel="t", ylabel="u(t)", title="Velocity at (0,0)")
+plot!(tis, as, label="a", xlabel="t", ylabel="a(t)", title="Acceleration at (0,0)")
+
+sim_gif!(sim;duration=5,step=0.1,verbose=true,R=inside(sim.flow.p),
+          remeasure=false,plotbody=true,clims=(-10,10))
