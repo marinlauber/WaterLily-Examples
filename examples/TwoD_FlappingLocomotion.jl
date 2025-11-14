@@ -15,7 +15,6 @@ function potential_unbounded!(FPM::ForcePartitionMethod{A,T},body;x₀=0,axis=no
     @inside FPM.pois.x[I] = FPM.σ[I] # put back pressure field
 end
 
-
 # Biot-Savart momentum step with U and acceleration prescribed
 import BiotSavartBCs: biot_mom_step!,biot_project!
 function biot_mom_step!(a::Flow{N},b,ω...;λ=quick,udf=nothing,fmm=true,U,kwargs...) where N
@@ -72,7 +71,7 @@ WaterLily.CFL(a::Flow) = WaterLily.CFL(a;Δt_max=0.1)
 function plate(L=2^6;ν,A=1/2,U=1,ϵ=0.5,Λ=4,f=0.5f0,thk=2ϵ+√2,mem=Array)
     # pure heave motion
     function map(x,t)
-        return x - SA[3L,3L-0.5f0*A*L*sin(2π*f*t*U/L)]
+        return x - SA[4L,4L-0.5f0*A*L*sin(2π*f*t*U/L)]
     end
     BiotSimulation((6L,6L),(0,0),L;U,ν,body=AutoBody((x,t)->ellipse(x,t;radius=L/2,Λ=Λ),map),ϵ,mem)
 end
@@ -87,7 +86,7 @@ function run(L=64,U=1,Λ=4.f0,radius=L/2.f0)
     # Ref = Laf/ν       -> ν = Laf/Ref = AL²f/Ref
     M = 1.f0
     A = 1.f0
-    Ref = 10^4.f0
+    Ref = 10^2.f0
     f = 1.f0
 
     # derived parameters
@@ -102,7 +101,7 @@ function run(L=64,U=1,Λ=4.f0,radius=L/2.f0)
     sim = plate(L;A,ν=A*L^2*f/Ref,mem=Array)
     store=[]
 
-    @gif for tᵢ in range(0,10.;step=0.05)
+    @gif for tᵢ in range(0,50.;step=0.05)
         # update
         t = sum(sim.flow.Δt[1:end-1])
         while t < tᵢ*sim.L/sim.U
@@ -123,19 +122,18 @@ function run(L=64,U=1,Λ=4.f0,radius=L/2.f0)
             a0 = copy(accel)
 
             # save position, velocity, etc
-            push!(store,[Δt,force...,accel...,pos...,vel...])
+            push!(store,[Δt,force...,accel...,pos[1],0.5f0sim.L*sin(2π*t*sim.U/sim.L),vel...])
 
-            # update time, must be done globally to set the pos/vel correctly
-            t_init = t; t += Δt
+            # update time
+            t += Δt
         end
         # plot vorticity
         @inside sim.flow.σ[I] = WaterLily.curl(3,I,sim.flow.u)*sim.L/sim.U
         @inside sim.flow.σ[I] = ifelse(sdf(sim.body,loc(0,I),WaterLily.time(sim))<0,NaN,sim.flow.σ[I])
         flood(sim.flow.σ|>Array,shift=(-1.5,-1.5),clims=(-5,5), axis=([], false),
               cfill=:seismic,legend=false,border=:none,size=(1080,1080))
-        body_plot!(sim);
         xs = SA[3sim.L,3sim.L] - sim.body.map(SA[3sim.L,3sim.L],WaterLily.time(sim))
-        quiver!([xs[1]],[xs[2]],quiver=([force[1]],[force[2]]),color=:black,lw=2,arrow=:closed,legend=false)
+        quiver!([xs[1]],[xs[2]],quiver=([force[1]/10],[force[2]/10]),color=:black,lw=2,arrow=:closed,legend=false)
         quiver!([xs[1]],[xs[2]],quiver=([sim.L*vel[1]],[sim.L*vel[2]]),color=:red,lw=2,arrow=:closed,legend=false)
         # print time step
         println("tU/L=",round(tᵢ,digits=4),", Δt=",round(sim.flow.Δt[end],digits=3),
