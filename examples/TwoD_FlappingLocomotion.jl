@@ -1,42 +1,58 @@
-using WaterLily,Plots,StaticArrays
+using WaterLily,Plots,StaticArrays,BiotSavartBCs,ForcePartition
 
-# # Biot-Savart momentum step with U and acceleration prescribed
-# import BiotSavartBCs: biot_mom_step!,biot_project!
-# function biot_mom_step!(a::Flow{N},b,ω...;λ=quick,udf=nothing,fmm=true,U,kwargs...) where N
-#     a.u⁰ .= a.u; scale_u!(a,0); t₁ = sum(a.Δt); t₀ = t₁-a.Δt[end]
-#     # predictor u → u'
-#     @log "p"
-#     conv_diff!(a.f,a.u⁰,a.σ,λ,ν=a.ν)
-#     udf!(a,udf,t₀; kwargs...)
-#     BDIM!(a);
-#     biot_project!(a,b,ω...,U;fmm) # new
-#     # corrector u → u¹
-#     @log "c"
-#     conv_diff!(a.f,a.u,a.σ,λ,ν=a.ν)
-#     udf!(a,udf,t₁; kwargs...)
-#     BDIM!(a); scale_u!(a,0.5)
-#     biot_project!(a,b,ω...,U;fmm,w=0.5) # new
-#     push!(a.Δt,CFL(a))
-# end
+"""
+    Solves the potential in an unbounded domain using the Biot-Savart and FMℓM methods.
+"""
+function potential_unbounded!(FPM::ForcePartitionMethod{A,T},body;x₀=0,axis=nothing,tᵢ=0) where {A,T}
+    @inside FPM.σ[I] = FPM.pois.x[I]
+    # generate source term
+    isnothing(axis) && (axis=A) # if we provide an axis, we use it
+    @inside FPM.pois.z[I] = source(body,loc(0,I,T),x₀,axis,tᵢ)
+    # solver for potential
+    solver!(FPM.pois); pop!(FPM.pois.n) # keep the tol the same as the pressure and don't write the iterations
+    # copy to the FPM
+    @inside FPM.ϕ[I] = FPM.pois.x[I]
+    @inside FPM.pois.x[I] = FPM.σ[I] # put back pressure field
+end
 
-#  momentum step with U and acceleration prescribed
-import WaterLily: mom_step!,scale_u!,conv_diff!,udf!,accelerate!,BDIM!,CFL,project!
-@fastmath function mom_step!(a::Flow{N},b::AbstractPoisson;λ=quick,udf=nothing,U,kwargs...) where N
+
+# Biot-Savart momentum step with U and acceleration prescribed
+import BiotSavartBCs: biot_mom_step!,biot_project!
+function biot_mom_step!(a::Flow{N},b,ω...;λ=quick,udf=nothing,fmm=true,U,kwargs...) where N
     a.u⁰ .= a.u; scale_u!(a,0); t₁ = sum(a.Δt); t₀ = t₁-a.Δt[end]
     # predictor u → u'
     @log "p"
-    conv_diff!(a.f,a.u⁰,a.σ,λ;ν=a.ν,perdir=a.perdir)
+    conv_diff!(a.f,a.u⁰,a.σ,λ,ν=a.ν)
     udf!(a,udf,t₀; kwargs...)
-    BDIM!(a); BC!(a.u,U,a.exitBC,a.perdir,t₁) # BC MUST be at t₁
-    project!(a,b); BC!(a.u,U,a.exitBC,a.perdir,t₁)
+    BDIM!(a);
+    biot_project!(a,b,ω...,U;fmm) # new
     # corrector u → u¹
     @log "c"
-    conv_diff!(a.f,a.u,a.σ,λ;ν=a.ν,perdir=a.perdir)
+    conv_diff!(a.f,a.u,a.σ,λ,ν=a.ν)
     udf!(a,udf,t₁; kwargs...)
-    BDIM!(a); scale_u!(a,0.5); BC!(a.u,U,a.exitBC,a.perdir,t₁)
-    project!(a,b,0.5); BC!(a.u,a.uBC,a.exitBC,a.perdir,t₁)
+    BDIM!(a); scale_u!(a,0.5)
+    biot_project!(a,b,ω...,U;fmm,w=0.5) # new
     push!(a.Δt,CFL(a))
 end
+
+# #  momentum step with U and acceleration prescribed
+import WaterLily: mom_step!,scale_u!,conv_diff!,udf!,accelerate!,BDIM!,CFL,project!
+# @fastmath function mom_step!(a::Flow{N},b::AbstractPoisson;λ=quick,udf=nothing,U,kwargs...) where N
+#     a.u⁰ .= a.u; scale_u!(a,0); t₁ = sum(a.Δt); t₀ = t₁-a.Δt[end]
+#     # predictor u → u'
+#     @log "p"
+#     conv_diff!(a.f,a.u⁰,a.σ,λ;ν=a.ν,perdir=a.perdir)
+#     udf!(a,udf,t₀; kwargs...)
+#     BDIM!(a); BC!(a.u,U,a.exitBC,a.perdir,t₁) # BC MUST be at t₁
+#     project!(a,b); BC!(a.u,U,a.exitBC,a.perdir,t₁)
+#     # corrector u → u¹
+#     @log "c"
+#     conv_diff!(a.f,a.u,a.σ,λ;ν=a.ν,perdir=a.perdir)
+#     udf!(a,udf,t₁; kwargs...)
+#     BDIM!(a); scale_u!(a,0.5); BC!(a.u,U,a.exitBC,a.perdir,t₁)
+#     project!(a,b,0.5); BC!(a.u,a.uBC,a.exitBC,a.perdir,t₁)
+#     push!(a.Δt,CFL(a))
+# end
 
 # define a line
 @inline @fastmath line(x,t,L=1,thk=1) = (y = x .- SA[clamp(x[1],-L/2,L/2),0]; √sum(abs2,y)-thk/2)
@@ -58,7 +74,7 @@ function plate(L=2^6;ν,A=1/2,U=1,ϵ=0.5,Λ=4,f=0.5f0,thk=2ϵ+√2,mem=Array)
     function map(x,t)
         return x - SA[3L,3L-0.5f0*A*L*sin(2π*f*t*U/L)]
     end
-    Simulation((6L,6L),(0,0),L;U,ν,body=AutoBody((x,t)->ellipse(x,t;radius=L/2,Λ=Λ),map),ϵ,mem)
+    BiotSimulation((6L,6L),(0,0),L;U,ν,body=AutoBody((x,t)->ellipse(x,t;radius=L/2,Λ=Λ),map),ϵ,mem)
 end
 
 
@@ -93,9 +109,9 @@ function run(L=64,U=1,Λ=4.f0,radius=L/2.f0)
             Δt = sim.flow.Δt[end]
             # remeasure the sim
             measure!(sim)
-            # biot_mom_step!(sim.flow,sim.pois,sim.ω,sim.x₀,sim.tar,sim.ftar;
-                        #    fmm=sim.fmm,udf=fall!,acceleration=-a0,U=-vel) # change of frame
-            mom_step!(sim.flow,sim.pois;udf=fall!,acceleration=-a0,U=-vel)
+            biot_mom_step!(sim.flow,sim.pois,sim.ω,sim.x₀,sim.tar,sim.ftar;
+                           fmm=sim.fmm,udf=fall!,acceleration=-a0,U=-vel) # change of frame
+            # mom_step!(sim.flow,sim.pois;udf=fall!,acceleration=-a0,U=-vel)
 
             # compute pressure force and moment
             force = -WaterLily.total_force(sim) # in lab frame, fix y
@@ -136,6 +152,6 @@ let # post-process
                 colorbar=:true, aspect_ratio=:equal,label=:none, lw=3, xlabel="X", ylabel="Y",)
     p2 = plot(cumsum(store_matrix[:,1]),[store_matrix[:,8],store_matrix[:,9]],
                 colorbar=:false, label=["Vx" "Vy"])
-    p3 = plot(cumsum(store_matrix[:,1]),store_matrix[:,2],colorbar=:false, label="force")
+    p3 = plot(cumsum(store_matrix[:,1]),2store_matrix[:,2]/sim.L,colorbar=:false, label="force")
     plot(p1, p2, p3, layout= @layout[a{0.5w} [grid(2,1)]])
 end
