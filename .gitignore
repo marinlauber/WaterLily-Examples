@@ -1,10 +1,12 @@
 Manifest.toml
-
 .vscode/
+!assets/*
+vtk_data/
+**/data*/
 *.log
 *.gif
 *.mp4
 *.pvd
-vtk_data/
 *.png
-!assets/*
+*.jld2
+.DS_store

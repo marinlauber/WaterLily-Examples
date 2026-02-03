@@ -8,6 +8,7 @@ end
 @inline @fastmath ∇u(I::CartesianIndex{2},u) = @SMatrix [WaterLily.∂(i,j,I,u) for i ∈ 1:2, j ∈ 1:2]
 @inline @fastmath ∇u(I::CartesianIndex{3},u) = @SMatrix [WaterLily.∂(i,j,I,u) for i ∈ 1:3, j ∈ 1:3]
 
+
 function hover(L=2^6;Re=250,U=1,amp=π/4,ϵ=0.5,thk=2ϵ+√2,mem=Array)
     # Line segment SDF
     function sdf(x,t)
