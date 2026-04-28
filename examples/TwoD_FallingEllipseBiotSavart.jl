@@ -1,4 +1,4 @@
-using WaterLily,BiotSavartBCs,Plots,CUDA,StaticArrays
+using WaterLily,BiotSavartBCs,Plots,CUDA,StaticArrays,WriteVTK
 
 # dummy overwrite
 import WaterLily: @loop,scale_u!,conv_diff!,udf!,accelerate!,BDIM!,CFL
@@ -39,6 +39,18 @@ end
 
 function run(L=128;T=Float32,U=1,Λ=4.f0,radius=T(L/2),mem=Array,Re=1e4)
 
+    # we know have to define these functions, for example:
+    vtk_vorticity(a::AbstractSimulation) = (@inside a.flow.σ[I] = WaterLily.curl(3,I,a.flow.u)*a.L/a.U; a.flow.σ |> Array)
+    vtk_body(a::AbstractSimulation) = (measure_sdf!(a.flow.σ, a.body, WaterLily.time(a.flow)); a.flow.σ |> Array)
+    vtk_position(a::AbstractSimulation) = (f=zeros(size(a.flow.σ)...,3); f[:,:,1] .= X₀[1]; f[:,:,2] .= X₀[2]; f |> Array)
+
+    # we might want to write some custom stuff, for this we have to create a `Dictionary`  of custom attributes
+    # with the keys being the names of the field in the vtk file and the values being the functions that return the data to an `Array`.
+    custom_write_attributes = Dict("ω" => vtk_vorticity,"d" => vtk_body, "pos"=>vtk_position)
+
+    # now we prepare the vtk writer
+    wr = vtkWriter("falling_ellipse"; attrib=custom_write_attributes)
+
     # fsi parameters
     ρ = 10.f0                               # buoyancy corrected density
     mₐ = SA{T}[π*radius^2,π*radius^2/Λ^2]   # added-mass coefficient ellipse
@@ -54,7 +66,7 @@ function run(L=128;T=Float32,U=1,Λ=4.f0,radius=T(L/2),mem=Array,Re=1e4)
     sim = BiotSimulation((6L,6L),(0,0),L/2.f0;U,ν=U*L/2Re,body,T,mem,Δt=0.05f0)
     Xₘ = copy(X₀) # the moment point is constant in lab frame
 
-    @gif for tᵢ in range(0,16.0;step=0.1)
+    @gif for tᵢ in range(0,20.0;step=0.1)
         # update
         while sim_time(sim) < tᵢ
             # the step we are doing and the initial angle
@@ -84,7 +96,9 @@ function run(L=128;T=Float32,U=1,Λ=4.f0,radius=T(L/2),mem=Array,Re=1e4)
               cfill=:seismic,legend=false,border=:none,size=(1080,1080)); body_plot!(sim)
         println("tU/L=",round(tᵢ,digits=4),", Δt=",round(sim.flow.Δt[end],digits=3),
                 " X₂=", round(X₀[2]/sim.L,digits=3), " θ=", round(rad2deg(θ),digits=3))
+        save!(wr, sim)
     end
+    close(wr)
     return sim
 end
 
