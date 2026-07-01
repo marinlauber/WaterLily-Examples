@@ -17,9 +17,11 @@ Two example notebooks are available to help you get started with WaterLily, they
 [![Pluto notebook link](assets/Pluto_shark.png)](notebooks/Shark.jl)
 ![shark](assets/shark.gif)
 
-### List examples
+### Prompts for coding agents
 
-Below we provide a list of all the examples available
+We have included a sample [AGENTS.md](AGENTS.md) file to help coding agents get familiar with the WaterLily.jl solver and [AGENTS-ecosystem.md](AGENTS-ecosystem.md) for the wider WaterLily-jl ecosystem of packages. In our (limited) experience, this helps coding agents navigate through the examples efficiently and reduce hallucinations when helping create WaterLily scripts. If you find other prompts which help agents use WaterLily, please let us know by opening an issue or creating a pull request with updates to those files. 
+
+### Complete example list
 
 #### 2D
 - [2D flow around a circle (also demo how to log pressure solver)](examples/TwoD_Circle.jl)
@@ -77,20 +79,20 @@ A set of [flow metric functions](https://github.com/WaterLily-jl/WaterLily.jl/bl
 
 #### 3D Taylor Green Vortex
 
-The three-dimensional [Taylor Green Vortex](examples/ThreeD_TaylorGreenVortex.jl) demonstrates many of the other available simulation options. First, you can simulate a non-trivial initial velocity field by passing in a vector function `uλ(i,xyz)` where `i ∈ (1,2,3)` indicates the velocity component `uᵢ` and `xyz=[x,y,z]` is the position vector.
+The three-dimensional [Taylor Green Vortex](examples/ThreeD_TaylorGreenVortex.jl) demonstrates many of the other available simulation options. First, you can simulate a non-trivial initial velocity field by passing in a vector function `u0(i,xyz)` where `i ∈ (1,2,3)` indicates the velocity component `uᵢ` and `xyz=[x,y,z]` is the position vector.
 ```julia
 function TGV(L; Re=1600, U=1, T=Float32, mem=Array)
     # wavenumber, velocity
     κ, U = T(π/L), T(U)
     # Taylor-Green-Vortex initial velocity field
-    function uλ(i,xyz)
+    function u0(i,xyz)
         x,y,z = @. xyz*κ                       # scaled coordinates
         i==1 && return -U*sin(x)*cos(y)*cos(z) # u_x
         i==2 && return  U*cos(x)*sin(y)*cos(z) # u_y
         return zero(U)                         # u_z
     end
     # Initialize simulation
-    return Simulation((L, L, L), (0, 0, 0), L; U, uλ, ν = U*L/Re, T, mem)
+    return Simulation((L, L, L), (0, 0, 0), L; U, u0, ν = U*L/Re, T, mem)
 end
 ```
 This example also demonstrates the floating point type (`T=Float32`) and array memory type (`mem=Array`) options. For example, to run on an NVIDIA GPU we only need to import the [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) library and initialize the `Simulation` memory on that device.
@@ -259,7 +261,7 @@ sim = make_sim(...)
 writer = vtkWriter("simple_writer")
 
 # write the data
-write!(writer,sim)
+save!(writer,sim)
 
 # don't forget to close the file
 close(writer)
@@ -300,8 +302,8 @@ where `...` should be replaced with the code that generates the field you want t
 Since we save the entire data array of a field, the ghost cells (see below) are also saved. This is useful for debugging, but useless for post-processing and can actually pollute the visuals. To get the actual field in `Paraview`, you can use the `ExtractSubset` filter and select the `VOI` (Volume of Interest) to remove the first and the last cell in each direction. ![subset](assets/ExtractSubset.png)
 
 > **_NOTE:_**
-The `WriteVTK.jl` package requires components to come first when writing vector and tensor fields, but they are store with component last in `WaterLily`. For vector field, this permutation of dimensions is done automatically in the `write!` function ($V_{ijkα}→ V_{αijk}$). This is why you can simply pass `sim.flow.u |> Array` to the writer.
-For tensor fields, you will need to permute the dimensions __once__ yourself ($T_{ijkαβ}→ T_{βijkα}$) before writing to the file, the second permutation is done in the `write!` function ($T_{βijkα}→ T_{αβijk}$). This operation can be done simply as `permutedims(TensorField, (4,1,2,3))`.
+The `WriteVTK.jl` package requires components to come first when writing vector and tensor fields, but they are store with component last in `WaterLily`. For vector field, this permutation of dimensions is done automatically in the `save!` function ($V_{ijkα}→ V_{αijk}$). This is why you can simply pass `sim.flow.u |> Array` to the writer.
+For tensor fields, you will need to permute the dimensions __once__ yourself ($T_{ijkαβ}→ T_{βijkα}$) before writing to the file, the second permutation is done in the `save!` function ($T_{βijkα}→ T_{αβijk}$). This operation can be done simply as `permutedims(TensorField, (4,1,2,3))`.
 
 #### Restarting from a VTK file
 
@@ -313,7 +315,7 @@ sim = make_sim(...)
 writer = restart_sim!(sim; fname="file_restart.pvd")
 
 # append sim data to the file used for restart
-write!(writer, sim)
+save!(writer, sim)
 
 # don't forget to close the file
 close(writer)
